@@ -113,7 +113,7 @@ class Decoder(nn.Module):
 
         if h_t_1_tilde is None:
             # If this is the first time-step,
-            h_t_1_tilde = emb_t.new(batch_size, 1, hidden_size).zero_()
+            h_t_1_tilde = emb_t.new_zeros((batch_size, 1, hidden_size))
 
         # Input feeding trick.
         x = torch.cat([emb_t, h_t_1_tilde], dim=-1)
