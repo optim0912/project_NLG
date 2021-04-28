@@ -228,7 +228,7 @@ class Seq2Seq(nn.Module):
                                                             -1,
                                                             self.hidden_size
                                                             ).transpose(0, 1).contiguous() 
-															# view는 transpose와 달리 반드시 contiguous tensor여야 한다. 그리고 return output도 반드시 contiguous tensor가 되어야 한다.
+		# view는 transpose와 달리 반드시 contiguous tensor여야 한다. 그리고 return output도 반드시 contiguous tensor가 되어야 한다.
         c_0_tgt = c_0_tgt.transpose(0, 1).contiguous().view(batch_size,
                                                             -1,
                                                             self.hidden_size
