@@ -70,7 +70,7 @@ class MaximumLikelihoodEstimationEngine(Engine):
 
         if engine.config.gpu_id >= 0 and not engine.config.off_autocast:
             engine.scaler.scale(backward_target).backward()
-        else:
+        else: # cpu
             backward_target.backward()
 
         word_count = int(mini_batch.tgt[1].sum())
