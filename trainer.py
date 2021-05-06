@@ -187,6 +187,15 @@ class MaximumLikelihoodEstimationEngine(Engine):
                     engine.best_loss,
                     np.exp(engine.best_loss),
                 ))
+				
+	# After every train epoch, run 1 validation epoch.
+    # Also, apply LR scheduler if it is necessary.
+	@staticmethod
+    def run_validation(engine, validation_engine, valid_loader):
+        validation_engine.run(valid_loader, max_epochs=1)
+
+        if engine.lr_scheduler is not None:
+            engine.lr_scheduler.step()
 
     @staticmethod
     def resume_training(engine, resume_epoch):
@@ -200,7 +209,7 @@ class MaximumLikelihoodEstimationEngine(Engine):
             engine.best_loss = loss
 
     @staticmethod
-    def save_model(engine, train_engine, config, src_vocab, tgt_vocab):
+    def save_model(engine, train_engine, config, src_vocab, tgt_vocab): # checkpoint로 바꾸자. ignite.contrib.engines.common.setup_common_training_handlers
         avg_train_loss = train_engine.state.metrics['loss']
         avg_valid_loss = engine.state.metrics['loss']
 
@@ -263,6 +272,11 @@ class SingleTrainer():
             config=self.config
         )
 
+		# Attach validation loss check procedure for every end of validation epoch.
+        validation_engine.add_event_handler(
+            Events.EPOCH_COMPLETED, self.target_engine_class.check_best
+        )
+		
         # Do necessary attach procedure to train & validation engine.
         # Progress bar and metric would be attached.
         self.target_engine_class.attach(
@@ -271,21 +285,14 @@ class SingleTrainer():
             verbose=self.config.verbose
         )
 
-        # After every train epoch, run 1 validation epoch.
-        # Also, apply LR scheduler if it is necessary.
-        def run_validation(engine, validation_engine, valid_loader):
-            validation_engine.run(valid_loader, max_epochs=1)
-
-            if engine.lr_scheduler is not None:
-                engine.lr_scheduler.step()
-
         # Attach above call-back function.
         train_engine.add_event_handler(
             Events.EPOCH_COMPLETED,
-            run_validation,
+            self.target_engine_class.run_validation,
             validation_engine,
             valid_loader
         )
+		
         # Attach other call-back function for initiation of the training.
         train_engine.add_event_handler(
             Events.STARTED,
@@ -293,10 +300,6 @@ class SingleTrainer():
             self.config.init_epoch,
         )
 
-        # Attach validation loss check procedure for every end of validation epoch.
-        validation_engine.add_event_handler(
-            Events.EPOCH_COMPLETED, self.target_engine_class.check_best
-        )
         # Attach model save procedure for every end of validation epoch.
         validation_engine.add_event_handler(
             Events.EPOCH_COMPLETED,
