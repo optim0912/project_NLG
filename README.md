@@ -2,7 +2,7 @@
 
 This project is a simple translator project that converts Korean and English to each other. 
 It supports not only the training of the translator, but also the use of the trained translator and the creation of the dataset required for training. 
-In addition, we plan to support **TPU distributed learning** for translator learning. 
+In addition, we plan to support **TPU distributed training** for translator training. 
 This project was created based on the [simple-nmt](https://github.com/kh-kim/simple-nmt) project.
 
 ## How to create a training dataset 
