@@ -26,7 +26,7 @@ pip install mosestokenizer
 bash ./install_mecab_linux.sh
 ```
 
-The pre-processing process is automated through the provided shell script. It may take approximately a few minutes. ()
+The pre-processing process is automated through the provided shell script. It may take approximately a few minutes.
 The final results are saved in the *dataset* folder. Several files created in the *dataset_process* folder on the way are not needed when training the translator, so you can delete them. (The code for subword segmentation is based on the [subword-nmt](https://github.com/kh-kim/subword-nmt) project.) 
 
 ```
