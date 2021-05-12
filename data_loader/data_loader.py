@@ -80,6 +80,9 @@ class DataLoader():
     def load_vocab(self, src_vocab, tgt_vocab):
         self.src.vocab = src_vocab
         self.tgt.vocab = tgt_vocab
+		
+	def build_vocab(self):
+	torchtext.vocab.Vocab(counter, max_size=None, min_freq=1, specials=('<unk>', '<pad>'), vectors=None, unk_init=None, vectors_cache=None, specials_first=True)
 
 
 class TranslationDataset(data.Dataset):
