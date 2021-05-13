@@ -1,13 +1,38 @@
 import fire
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from pathlib import Path
 from collections import Counter, OrderedDict
 from torchtext.vocab import Vocab
+import torch
 
 PAD, BOS, EOS = 1, 2, 3
 
 class DataLoader():
+"""Custom dataloader for learning translator. 
+    It has a train and valid dataloader, and a source and target vocabulary. 
+
+    Arguments:
+        train_fn : Training set file path(str) except the extention. (ex: train_en --> train)
+        valid_fn : Validation set file path(str) except the extention. (ex: valid_en --> valid)
+        exts : A tuple containing the extension to path for each language.
+        batch_size : Mini batch size for gradient descent. Default = 128
+        device : The device containing the batch. Default = 'cpu' (lazy loading)
+        max_vocab : The maximum size of the vocabulary, or None for no maximum. Default = 99999999
+        max_length : The maximum number of words in a sentence. Default = 255
+        fix_length: A fixed length that all examples will be padded to, 
+        or None for flexible sequence lengths. Default = None
+        use_bos : Use the BOS token.  Default = True
+        use_eos : Use the EOS token.  Default = True
+        shuffle : Whether to shuffle examples between epochs. Default = True
+        dsl : Turn on dual-supervised learning mode. Default = True
+        lazy : If true, the dataloader reads the text file one line each time. 
+        It prevents memory shortage caused by large datasets, but can cause I/O bottlenecks. default = True
+        num_workers : how many subprocesses to use for data loading. 
+        0 means that the data will be loaded in the main process. default = 0
+        pin_memory :  If True, the data loader will copy Tensors into 
+        CUDA pinned memory before returning them. default = False
+"""
 
     def __init__(self,
                  train_fn=None,
@@ -21,62 +46,78 @@ class DataLoader():
                  use_bos=True,
                  use_eos=True,
                  shuffle=True,
-                 dsl=False
+                 dsl=False,
+                 lazy=True,
+                 num_workers=0,
+                 pin_memory=False
                  ):
 
         super(DataLoader, self).__init__()
         
-        self.src_vocab = build_vocab(self, train_fn, exts[0], max_vocab, '<bos>' if dsl else None, '<eos>' if dsl else None)
-        self.tgt_vocab = build_vocab(self, train_fn, exts[1], max_vocab, '<bos>' if use_bos else None, '<eos>' if use_eos else None)
+        self.src_init_token, self.src_eos_token = '<bos>' if dsl else None, '<eos>' if dsl else None
+        self.tgt_init_token, self.tgt_eos_token = '<bos>' if use_bos else None, '<eos>' if use_eos else None
+        self.src_vocab = build_vocab(train_fn, exts[0], max_vocab, self.src_init_token, self.src_eos_token)
+        self.tgt_vocab = build_vocab(train_fn, exts[1], max_vocab, self.tgt_init_token, self.tgt_eos_token)
 
-        self.src = data.Field(
-            batch_first=True,
-            include_lengths=True,
-            fix_length=fix_length
-        )
-
-        self.tgt = data.Field(
-            batch_first=True,
-            include_lengths=True,
-            fix_length=fix_length,
-        )
+        translate_collate_fn = lambda batch : self.process(batch, fix_length, device)
 
         if train_fn is not None and valid_fn is not None and exts is not None:
-            train = TranslationDataset(
-                path=train_fn,
-                exts=exts,
-                fields=[('src', self.src), ('tgt', self.tgt)],
-                max_length=max_length
-            )
-            valid = TranslationDataset(
-                path=valid_fn,
-                exts=exts,
-                fields=[('src', self.src), ('tgt', self.tgt)],
-                max_length=max_length,
-            )
-
-            self.train_iter = data.BucketIterator(
-                train,
-                batch_size=batch_size,
-                device=device,
-                shuffle=shuffle,
-                sort_key=lambda x: len(x.tgt) + (max_length * len(x.src)),
-                sort_within_batch=True,
-            )
-            self.valid_iter = data.BucketIterator(
-                valid,
-                batch_size=batch_size,
-                device=device,
-                shuffle=False,
-                sort_key=lambda x: len(x.tgt) + (max_length * len(x.src)),
-                sort_within_batch=True,
-            )
-
+            if lazy:
+                train = LazyTranslationDataset(train_fn, exts, max_length)
+                valid = LazyTranslationDataset(valid_fn, exts, max_length)
+            else:
+                train = TranslationDataset(train_fn, exts, max_length)
+                valid = TranslationDataset(valid_fn, exts, max_length)
+        
+            train_sampler = BucketSampler(100 * batch_size, train.sort_key, shuffle=shuffle)
+            valid_sampler = BucketSampler(100 * batch_size, train.sort_key, shuffle=False)
+            
+            self.train_loader = DataLoader(train, batch_size, sampler = train_sampler, 
+            num_workers = num_workers, collate_fn = translate_collate_fn, pin_memory = pin_memory)
+            self.valid_loader = DataLoader(valid, batch_size, sampler = train_sampler, 
+            num_workers = num_workers, collate_fn = translate_collate_fn, pin_memory = pin_memory)
+    
+    def process(self, minibatch, fix_length, device):
+        minibatch = self.pad(minibatch, fix_length)
+        minibatch = self.numericalize(minibatch, device)
+        return minibatch
+    
     def load_vocab(self, src_vocab, tgt_vocab):
         self.src_vocab = src_vocab
         self.tgt_vocab = tgt_vocab
+    
+    def numericalize(self, minibatch, device=None):
+        """Turn a batch of examples that use this field into a Variable.
+
+        If the field has include_lengths=True, a tensor of lengths will be
+        included in the return value.
+
+        Arguments:
+            minibatch ((List[List[str]], List[int]), (List[List[str]], List[int])) :
+                Tuple of two tuple of List of tokenized and padded examples 
+                and List of lengths of each example.
+            device : (str or torch.device): A string or instance of `torch.device`
+                specifying which device the Variables are going to be created on.
+                If left as default, the tensors will be created on cpu. Default: None.
+        """
+            
+        src_batch, tgt_batch = minibatch
+        src_padded, src_lengths = src_batch
+        tgt_padded, tgt_lengths = tgt_batch
         
-    def pad(self, minibatch, fix_length, src_init_token, src_eos_token, tgt_init_token, tgt_eos_token):
+        src_padded_num = [[self.src_vocab.stoi[x] for x in ex] for ex in src_padded]
+        tgt_padded_num = [[self.tgt_vocab.stoi[x] for x in ex] for ex in src_padded]
+        src_padded_tensor = torch.tensor(src_padded_num, device=device).contiguous()
+        tgt_padded_tensor = torch.tensor(tgt_padded_num, device=device).contiguous()
+        src_lengths_tensor = torch.tensor(src_lengths, device=device).contiguous()
+        tgt_lengths_tensor = torch.tensor(src_lengths, device=device).contiguous()
+        
+        src_examples = (src_padded_tensor, src_lengths_tensor)
+        tgt_examples = (tgt_padded_tensor, tgt_lengths_tensor)
+        
+        return Batch(src_examples, tgt_examples)
+    
+    def pad(self, minibatch, fix_length):
         """Pad a batch of examples.
         """
         
@@ -86,30 +127,31 @@ class DataLoader():
             src_max_len = max(len(x) for x in src_minibatch)
             tgt_max_len = max(len(x) for x in tgt_minibatch)
         else:
-            src_max_len = fix_length + (src_init_token, src_eos_token).count(None) - 2
-            tgt_max_len = fix_length + (tgt_init_token, tgt_eos_token).count(None) - 2
+            src_max_len = fix_length + (self.src_init_token, self.src_eos_token).count(None) - 2
+            tgt_max_len = fix_length + (self.tgt_init_token, self.tgt_eos_token).count(None) - 2
             
         src_padded, src_lengths = [], []
         for x in src_minibatch:
             src_padded.append(
-                ([] if src_init_token is None else [src_init_token])
+                ([] if self.src_init_token is None else [self.src_init_token])
                 + x[:max_len]
-                + ([] if src_eos_token is None else [src_eos_token])
+                + ([] if self.src_eos_token is None else [self.src_eos_token])
                 + ["<pad>"] * max(0, src_max_len - len(x)))
             src_lengths.append(len(src_padded[-1]) - max(0, src_max_len - len(x)))
             
         tgt_padded, tgt_lengths = [], []
         for x in tgt_minibatch:
             tgt_padded.append(
-                ([] if tgt_init_token is None else [tgt_init_token])
+                ([] if self.tgt_init_token is None else [self.tgt_init_token])
                 + x[:max_len]
-                + ([] if tgt_eos_token is None else [tgt_eos_token])
+                + ([] if self.tgt_eos_token is None else [self.tgt_eos_token])
                 + ["<pad>"] * max(0, tgt_max_len - len(x)))
             tgt_lengths.append(len(tgt_padded[-1]) - max(0, tgt_max_len - len(x)))
             
         return ((src_padded, src_lengths), (tgt_padded, tgt_lengths))
-        
-    def build_vocab(self, train_fn, ext, max_vocab, init_token, eos_token):
+    
+    @staticmethod
+    def build_vocab(train_fn, ext, max_vocab, init_token, eos_token):
         """Construct the Vocab object from dataset.
 
         Arguments:
@@ -138,6 +180,48 @@ class DataLoader():
             tok for tok in ["<unk>", "<pad>", init_token, eos_token] 
             if tok is not None))
         return Vocab(counter, max_vocab, specials=specials)
+
+class TranslationDataset(Dataset):
+    """Defines a dataset for machine translation. 
+    Create a TranslationDataset given path.
+
+    Arguments:
+        path: Common prefix(str) of paths to the data files for both languages.
+        exts: A tuple containing the extension to path for each language.
+        max_length : The maximum number of words in a sentence.
+    """
+        
+    def __init__(self, path, exts, max_length):
+        
+        self.src_path, self.trg_path = tuple(Path(path + '_' + x) for x in exts)
+        self.src_sentences = []
+        self.trg_sentences = []
+        self.sort_key = []
+        self.len_dataset = 0
+        
+        with self.src_path.open(encoding='utf-8') as src_file, self.trg_path.open(encoding='utf-8') as trg_file:
+            while True:
+                src_line, trg_line = src_file.readline(), trg_file.readline()
+                if src_line == '' and trg_line == '':
+                    break
+                src_line, trg_line = src_line.strip(), trg_line.strip()
+                src_length, trg_length = len(src_line.split()), len(trg_line.split())
+                if max_length and max_length < max(src_length, trg_length):
+                    continue
+                if src_line != '' and trg_line != '':
+                    self.src_sentences.append(src_line)
+                    self.tgt_sentences.append(src_line)
+                    self.sort_key.append(trg_length + max_length * src_length)
+                    self.len_dataset += 1
+    
+    def __getitem__(self, index):
+        src_sentence = self.src_sentences[index]
+        trg_sentence = self.trg_sentences[index]
+
+        return (src_sentence, trg_sentence)
+        
+    def __len__(self):
+        return self.len_dataset
         
 class LazyTranslationDataset(Dataset):
     """Defines a dataset for machine translation. 
@@ -150,13 +234,12 @@ class LazyTranslationDataset(Dataset):
         max_length : The maximum number of words in a sentence.
     """
         
-    def __init__(self, path, exts, max_length=None):
+    def __init__(self, path, exts, max_length):
         
         self.src_path, self.trg_path = tuple(Path(path + '_' + x) for x in exts)
         self.src_line_offset = []
         self.trg_line_offset = []
-        self.src_line_length = []
-        self.trg_line_length = []
+        self.sort_key = []
         self.len_dataset = 0
         
         with self.src_path.open(encoding='utf-8') as src_file, self.trg_path.open(encoding='utf-8') as trg_file:
@@ -172,8 +255,7 @@ class LazyTranslationDataset(Dataset):
                 if src_line != '' and trg_line != '':
                     self.src_line_offset.append(src_offset)
                     self.trg_line_offset.append(trg_offset)
-                    self.src_line_length.append(src_length)
-                    self.trg_line_length.append(trg_length)
+                    self.sort_key.append(trg_length + max_length * src_length)
                     self.len_dataset += 1
     
     def __getitem__(self, index):
@@ -201,7 +283,7 @@ class BucketSampler(DistributedSampler):
         bucket_size : Sorting is performed only as much as the bucket size.
         sort_key : Sort_key for sorting.
         **kwargs : Arguments of the inheriting DistributedSampler class. 
-        (dataset, num_replicas, rank, shuffle, seed, drop_last)
+        (dataset, num_replicas, rank, shuffle(default = True), seed, drop_last)
     """
 
     def __init__(self, bucket_size, sort_key, **kwargs):
@@ -266,17 +348,17 @@ class BucketSampler(DistributedSampler):
         
 class Batch():
     """The class representing an batch of a dataset. 
-    It consists of source sentences and target sentences. 
+    It consists of source examples and target examples. 
     """
         
-    def __init__(self, src_sentence, tgt_sentence):
-        self.src = src_sentence
-        self.tgt = tgt_sentence
+    def __init__(self, src_examples, tgt_examples):
+        self.src = src_examples
+        self.tgt = tgt_examples
 
 def dataloader_test(train_fn=None,
                  valid_fn=None,
                  exts=None,
-                 batch_size=128,
+                 batch_size=64,
                  device='cpu',
                  max_vocab=99999999,
                  max_length=255,
@@ -284,25 +366,13 @@ def dataloader_test(train_fn=None,
                  use_bos=True,
                  use_eos=True,
                  shuffle=True,
-                 dsl=False
+                 dsl=False,
+                 lazy=True,
+                 num_workers=0,
+                 pin_memory=False
                  ):
     """Test the dataloader. Outputs the vocabulary size and one batch of source and target. 
         Also, the two examples in the batch are converted into strings and displayed. 
-
-    Arguments:
-        train_fn : Training set file path(str) except the extention. (ex: train_en --> train)
-        valid_fn : Validation set file path(str) except the extention. (ex: valid_en --> valid)
-        exts : A tuple containing the extension to path for each language.
-        batch_size : Mini batch size for gradient descent. Default = 128
-        device : The device containing the batch. Default = 'cpu' (lazy loading)
-        max_vocab : The maximum size of the vocabulary, or None for no maximum. Default = 99999999
-        max_length : The maximum number of words in a sentence. Default = 255
-        fix_length: A fixed length that all examples will be padded to, 
-        or None for flexible sequence lengths. Default = None
-        use_bos : Use the BOS token.  Default = True
-        use_eos : Use the EOS token.  Default = True
-        shuffle : Whether to shuffle examples between epochs. Default = True
-        dsl : Turn on dual-supervised learning mode. Default = True
     """
     
     loader = DataLoader(train_fn,
@@ -316,7 +386,10 @@ def dataloader_test(train_fn=None,
                  use_bos,
                  use_eos,
                  shuffle,
-                 dsl
+                 dsl,
+                 lazy=True,
+                 num_workers=0,
+                 pin_memory=False
                  )
     
     src_vocab_itos = loader.src_vocab.itos
