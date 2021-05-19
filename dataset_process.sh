@@ -72,6 +72,14 @@ head -n 2 ./dataset_process/corpus_shuf_train_tok_bpe_*
 head -n 2 ./dataset_process/corpus_shuf_valid_tok_bpe_*
 head -n 2 ./dataset_process/corpus_shuf_test_tok_bpe_*
 wc -l ./dataset_process/corpus_shuf_*_tok_bpe_*
-mv ./dataset_process/corpus_shuf_*_tok_bpe_* ./dataset
+echo "Complete"
+echo
+
+echo "[Split Train Corpus]"
+split -l 300000 -d ./dataset_process/corpus_shuf_train_tok_bpe_ko ./dataset_process/corpus_shuf_train_tok_bpe_ko_
+split -l 300000 -d ./dataset_process/corpus_shuf_train_tok_bpe_en ./dataset_process/corpus_shuf_train_tok_bpe_en_
+mv ./dataset_process/corpus_shuf_train_tok_bpe_*_* ./dataset
+mv ./dataset_process/corpus_shuf_valid_tok_bpe_* ./dataset
+mv ./dataset_process/corpus_shuf_test_tok_bpe_* ./dataset
 echo "Complete"
 echo
