@@ -37,7 +37,8 @@ class TranslationDataLoader():
                  lazy=True,
                  num_workers=0,
                  pin_memory=False,
-                 num_parallel_reads=2
+                 num_parallel_reads=2,
+				 seed=2021
                  ):
         
         self.src_init_token, self.src_eos_token = '<bos>' if dsl else None, '<eos>' if dsl else None
@@ -58,7 +59,7 @@ class TranslationDataLoader():
                               self.tgt_init_token, self.tgt_eos_token)
 
             self.train_sampler = BucketSampler(100*batch_size, batch_size, train.sort_key, 
-                            dataset=train, shuffle=shuffle, num_replicas=1, rank=0, seed=2021)
+                            dataset=train, shuffle=shuffle, num_replicas=1, rank=0, seed=seed)
             self.valid_sampler = BucketSampler(100*batch_size, batch_size, train.sort_key, 
                             dataset=valid, shuffle=False, num_replicas=1, rank=0)
             
@@ -435,7 +436,8 @@ def Dataloader_Test(train_fn:str=None,
                  lazy:bool=True,
                  num_workers:int=0,
                  pin_memory:bool=False,
-                 num_parallel_reads:int=2
+                 num_parallel_reads:int=2,
+				 seed:int=2021
                  ):
     """Test the dataloader. Outputs the vocabulary size and one batch of source and target. 
         Also, the two examples in the batch are converted into strings and displayed. 
@@ -463,6 +465,7 @@ def Dataloader_Test(train_fn:str=None,
         num_parallel_reads : The number of processes to read text files at the same time.
         num_parallel_reads is the number of processes when the dataloader is first initialized, 
         and num_workers is the number of processes when loading data from the dataloader. 
+		seed : If shuffle is True, it sets the seed of the random generator used to shuffle the train dataset. 
     """
     
     config = locals()
