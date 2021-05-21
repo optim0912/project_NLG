@@ -32,3 +32,12 @@ The final results are saved in the *dataset* folder. Several files created in th
 ```
 bash ./dataset_process.sh
 ```
+
+||enko|koen|
+|:-:|:-:|:-:|
+|Sequence-to-Sequence|32.53|29.67|
+|Sequence-to-Sequence (MRT)|34.04|31.24|
+|Sequence-to-Sequence (DSL)|33.47|31.00|
+|Transformer|34.96|31.84|
+|Transformer (MRT)|-|-|
+|Transformer (DSL)|35.48|32.80|
