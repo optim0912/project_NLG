@@ -33,11 +33,23 @@ The final results are saved in the *dataset* folder. Several files created in th
 >> bash ./dataset_process.sh
 ```
 
-||enko|koen|
-|:-:|:-:|:-:|
-|Sequence-to-Sequence|32.53|29.67|
-|Sequence-to-Sequence (MRT)|34.04|31.24|
-|Sequence-to-Sequence (DSL)|33.47|31.00|
-|Transformer|34.96|31.84|
-|Transformer (MRT)|-|-|
-|Transformer (DSL)|35.48|32.80|
+## TranslationDataLoader class
+
+This class is specific to the dataset created and preprocessed in the previous section. This class creates a batch from the dataset and loads each batch. For options and usage of the class, refer to *dataloader_test.ipynb* in the *sample* folder. If you are using a personal custom dataset, you may need to change the TranslationDataloader class to suit the dataset. For optimal performance, the options of the provided class (for example, num_workers, lazy, num_parallel_reads, etc.) need to be adjusted according to the user's environment.
+
+When the TranslationDataloader is tested in the Colab environment, the results are shown in the table below. The time taken for initialization (the time taken to create one dataloader instance), the time taken for iteration (the time taken to output sentence pairs in 100 batches from one dataloader), and the memory usage of one dataloader were measured. Except for the three options (lazy, num_workers, num_parallel_reads), the rest of the options are default.
+
+|                                                                   | initialization time (seconds) | iteration time (seconds) | memory usage (MB) |
+|:-----------------------------------------------------------------:|:-----------------------------:|:------------------------:|:-----------------:|
+|  lazy : True  <br/> num_workers : 0 <br/> num_parallel_reads : 1  |             206.255           |           13.752         |       **263**     |
+|  lazy : True  <br/> num_workers : 0 <br/> num_parallel_reads : 2  |             185.152           |           13.521         |       **263**     |
+|  lazy : True  <br/> num_workers : 2 <br/> num_parallel_reads : 1  |             199.420           |           10.082         |       **263**     |
+|  lazy : True  <br/> num_workers : 2 <br/> num_parallel_reads : 2  |             183.965           |           10.175         |       **263**     |
+|  lazy : False <br/> num_workers : 0 <br/> num_parallel_reads : 1  |             188.080           |         **3.127**        |        10156      |
+|  lazy : False <br/> num_workers : 0 <br/> num_parallel_reads : 2  |           **158.450**         |         **3.092**        |        10156      |
+|  lazy : False <br/> num_workers : 2 <br/> num_parallel_reads : 1  |             171.935           |           3.715          |        10156      |
+|  lazy : False <br/> num_workers : 2 <br/> num_parallel_reads : 2  |           **158.063**         |           4.317          |        10156      |
+
+When lazy is True, memory usage is greatly reduced, but iteration time increases. This is because lazy loading stores only the offsets of sentences in memory instead of all the sentences themselves contained in the entire text files. However, since text files must be opened every time a batch is created, I/O overhead may occur and iteration time increases. Therefore, for large datasets, it is better to set the lazy option to True, and if the training time is important, it is better to set it to False. When lazy is False, an additional effect of improving the initialization time can be obtained. This is because inefficient readline() can be avoided when reading text files.
+
+If num_parallel_reads is greater than 1, multiple text files can be read at the same time, thus improving the initialization time. If num_workers is greater than 1, batch generation is executed in parallel using several processes, thus improving iteration time. However, be careful as performance may deteriorate depending on the amount of RAM and the number of CPU or GPU cores. 
