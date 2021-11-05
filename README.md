@@ -1,14 +1,14 @@
 # project_NLG
 
 This project is a simple translator project that converts Korean and English to each other. 
-It supports not only the training of the translator, but also the use of the trained translator and the creation of the dataset required for training. 
+It supports not only the training of the translator but also the use of the trained translator and the creation of the dataset required for training. 
 In addition, we plan to support **TPU distributed training** for translator training. 
 This project was created based on the [simple-nmt](https://github.com/kh-kim/simple-nmt) project.
 
 ## How to create a training dataset 
 
 This section describes how to obtain a dataset that was used for training, validation, and evaluation of a trained translator. 
-If you already have your own dataset or just want to use the translator, you can skip this section. 
+If you already have your dataset or just want to use the translator, you can skip this section. 
 
 As the dataset, we used the [AI Hub's Korean-English translation corpus dataset](https://aihub.or.kr/aidata/87/download). 
 Please understand that this dataset cannot be provided directly due to copyright issues. 
